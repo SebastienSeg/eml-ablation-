@@ -1,0 +1,642 @@
+{
+  "meta": {
+    "n_seeds": 5,
+    "hidden": 24,
+    "depth": 3,
+    "n_train": 2000,
+    "n_test": 500,
+    "device": "cpu",
+    "total_time_sec": 3518.882340669632
+  },
+  "in_domain": {
+    "EML|explog_product": {
+      "mse_median": 0.002040406223386526,
+      "mse_ci95": [
+        0.0007573681650683284,
+        0.005299073178321123
+      ],
+      "conv_rate": 0.2,
+      "div_rate": 0.0,
+      "time_mean": 13.513344669342041,
+      "n_params": 1516
+    },
+    "EML-noexp|explog_product": {
+      "mse_median": 0.021665241569280624,
+      "mse_ci95": [
+        0.009205089882016182,
+        0.14235055446624756
+      ],
+      "conv_rate": 0.0,
+      "div_rate": 0.0,
+      "time_mean": 8.694456100463867,
+      "n_params": 835
+    },
+    "EML-nolog|explog_product": {
+      "mse_median": 9.111000690609217e-05,
+      "mse_ci95": [
+        2.0337600290076807e-05,
+        0.0006571236299350858
+      ],
+      "conv_rate": 1.0,
+      "div_rate": 0.0,
+      "time_mean": 9.390039205551147,
+      "n_params": 835
+    },
+    "exp-only|explog_product": {
+      "mse_median": 2.6707743018050678e-05,
+      "mse_ci95": [
+        1.967396201507654e-05,
+        4.138345320825465e-05
+      ],
+      "conv_rate": 1.0,
+      "div_rate": 0.0,
+      "time_mean": 9.707285308837891,
+      "n_params": 1405
+    },
+    "log-only|explog_product": {
+      "mse_median": 0.014562180265784264,
+      "mse_ci95": [
+        0.006069838535040617,
+        0.13640151917934418
+      ],
+      "conv_rate": 0.0,
+      "div_rate": 0.0,
+      "time_mean": 8.846840095520019,
+      "n_params": 1405
+    },
+    "ReLU-MLP|explog_product": {
+      "mse_median": 4.85490782011766e-05,
+      "mse_ci95": [
+        3.518145967973396e-05,
+        0.13281184434890747
+      ],
+      "conv_rate": 0.6,
+      "div_rate": 0.0,
+      "time_mean": 5.958739852905273,
+      "n_params": 1441
+    },
+    "KAN|explog_product": {
+      "mse_median": 3.82753751182463e-05,
+      "mse_ci95": [
+        1.8553295376477763e-05,
+        0.00017865162226371467
+      ],
+      "conv_rate": 1.0,
+      "div_rate": 0.0,
+      "time_mean": 34.737540340423585,
+      "n_params": 1568
+    },
+    "EML|power_function": {
+      "mse_median": 0.0012917490676045418,
+      "mse_ci95": [
+        0.0003954219864681363,
+        0.46328437328338623
+      ],
+      "conv_rate": 0.2,
+      "div_rate": 0.0,
+      "time_mean": 13.331798410415649,
+      "n_params": 1516
+    },
+    "EML-noexp|power_function": {
+      "mse_median": 0.6072472929954529,
+      "mse_ci95": [
+        0.11849856376647949,
+        0.9811034202575684
+      ],
+      "conv_rate": 0.0,
+      "div_rate": 0.0,
+      "time_mean": 8.816217041015625,
+      "n_params": 835
+    },
+    "EML-nolog|power_function": {
+      "mse_median": 0.00017042714171111584,
+      "mse_ci95": [
+        6.315651262411848e-05,
+        1.1887954473495483
+      ],
+      "conv_rate": 0.6,
+      "div_rate": 0.0,
+      "time_mean": 9.445310592651367,
+      "n_params": 835
+    },
+    "exp-only|power_function": {
+      "mse_median": 4.085702312295325e-05,
+      "mse_ci95": [
+        1.5010380593594164e-05,
+        4.7653036745032296e-05
+      ],
+      "conv_rate": 1.0,
+      "div_rate": 0.0,
+      "time_mean": 9.735409021377563,
+      "n_params": 1405
+    },
+    "log-only|power_function": {
+      "mse_median": 0.004233549814671278,
+      "mse_ci95": [
+        0.0019851115066558123,
+        0.7868651151657104
+      ],
+      "conv_rate": 0.0,
+      "div_rate": 0.0,
+      "time_mean": 8.881698989868164,
+      "n_params": 1405
+    },
+    "ReLU-MLP|power_function": {
+      "mse_median": 0.00015207442629616708,
+      "mse_ci95": [
+        0.00012242529192008078,
+        8.317578315734863
+      ],
+      "conv_rate": 0.8,
+      "div_rate": 0.0,
+      "time_mean": 5.955305337905884,
+      "n_params": 1441
+    },
+    "KAN|power_function": {
+      "mse_median": 0.00025552973966114223,
+      "mse_ci95": [
+        0.0001251552312169224,
+        0.0018157134763896465
+      ],
+      "conv_rate": 0.8,
+      "div_rate": 0.0,
+      "time_mean": 35.276671695709226,
+      "n_params": 1568
+    },
+    "EML|logistic_log": {
+      "mse_median": 0.04969988390803337,
+      "mse_ci95": [
+        0.019003508612513542,
+        0.09684550017118454
+      ],
+      "conv_rate": 0.0,
+      "div_rate": 0.0,
+      "time_mean": 12.635033512115479,
+      "n_params": 1395
+    },
+    "EML-noexp|logistic_log": {
+      "mse_median": 1.632516860961914,
+      "mse_ci95": [
+        1.460336685180664,
+        1.6869548559188843
+      ],
+      "conv_rate": 0.0,
+      "div_rate": 0.0,
+      "time_mean": 8.019437742233276,
+      "n_params": 770
+    },
+    "EML-nolog|logistic_log": {
+      "mse_median": 0.10554035007953644,
+      "mse_ci95": [
+        0.09344351291656494,
+        0.11460339277982712
+      ],
+      "conv_rate": 0.0,
+      "div_rate": 0.0,
+      "time_mean": 9.445260381698608,
+      "n_params": 770
+    },
+    "exp-only|logistic_log": {
+      "mse_median": 0.6346849203109741,
+      "mse_ci95": [
+        0.6346279978752136,
+        0.6347100734710693
+      ],
+      "conv_rate": 0.0,
+      "div_rate": 0.0,
+      "time_mean": 10.340823316574097,
+      "n_params": 1428
+    },
+    "log-only|logistic_log": {
+      "mse_median": 1.5741174221038818,
+      "mse_ci95": [
+        1.3012679815292358,
+        1.7163991928100586
+      ],
+      "conv_rate": 0.0,
+      "div_rate": 0.0,
+      "time_mean": 8.799304676055907,
+      "n_params": 1428
+    },
+    "ReLU-MLP|logistic_log": {
+      "mse_median": 0.6341902017593384,
+      "mse_ci95": [
+        0.6340064406394958,
+        0.6343600749969482
+      ],
+      "conv_rate": 0.0,
+      "div_rate": 0.0,
+      "time_mean": 5.922505474090576,
+      "n_params": 1465
+    },
+    "KAN|logistic_log": {
+      "mse_median": 0.002148369327187538,
+      "mse_ci95": [
+        0.000903030508197844,
+        0.00628797197714448
+      ],
+      "conv_rate": 0.2,
+      "div_rate": 0.0,
+      "time_mean": 30.510387468338013,
+      "n_params": 1302
+    },
+    "EML|cross_entropy": {
+      "mse_median": 0.0015671314904466271,
+      "mse_ci95": [
+        0.0007129821460694075,
+        0.006591906771063805
+      ],
+      "conv_rate": 0.4,
+      "div_rate": 0.0,
+      "time_mean": 13.203391313552856,
+      "n_params": 1516
+    },
+    "EML-noexp|cross_entropy": {
+      "mse_median": 0.04331588000059128,
+      "mse_ci95": [
+        0.040345918387174606,
+        0.0466766282916069
+      ],
+      "conv_rate": 0.0,
+      "div_rate": 0.0,
+      "time_mean": 8.615321159362793,
+      "n_params": 835
+    },
+    "EML-nolog|cross_entropy": {
+      "mse_median": 5.5805259762564674e-05,
+      "mse_ci95": [
+        1.6868525563040748e-05,
+        0.002208972815424204
+      ],
+      "conv_rate": 0.6,
+      "div_rate": 0.0,
+      "time_mean": 9.380457258224487,
+      "n_params": 835
+    },
+    "exp-only|cross_entropy": {
+      "mse_median": 6.779232535336632e-06,
+      "mse_ci95": [
+        3.898984687111806e-06,
+        2.154923276975751e-05
+      ],
+      "conv_rate": 1.0,
+      "div_rate": 0.0,
+      "time_mean": 9.606631994247437,
+      "n_params": 1405
+    },
+    "log-only|cross_entropy": {
+      "mse_median": 0.01419414859265089,
+      "mse_ci95": [
+        0.01272573135793209,
+        0.2017683982849121
+      ],
+      "conv_rate": 0.0,
+      "div_rate": 0.0,
+      "time_mean": 8.715206336975097,
+      "n_params": 1405
+    },
+    "ReLU-MLP|cross_entropy": {
+      "mse_median": 3.0438728572335094e-05,
+      "mse_ci95": [
+        2.3996128220460378e-05,
+        5.401268936111592e-05
+      ],
+      "conv_rate": 1.0,
+      "div_rate": 0.0,
+      "time_mean": 5.846949529647827,
+      "n_params": 1441
+    },
+    "KAN|cross_entropy": {
+      "mse_median": 2.167502316297032e-05,
+      "mse_ci95": [
+        1.2480794794100802e-05,
+        2.4594761271146126e-05
+      ],
+      "conv_rate": 1.0,
+      "div_rate": 0.0,
+      "time_mean": 34.70225338935852,
+      "n_params": 1568
+    }
+  },
+  "out_of_domain": {
+    "EML|polynomial": {
+      "mse_median": 1.1765687465667725,
+      "div_rate": 0.0
+    },
+    "EML-noexp|polynomial": {
+      "mse_median": 21.083044052124023,
+      "div_rate": 0.0
+    },
+    "EML-nolog|polynomial": {
+      "mse_median": 3.0845859050750732,
+      "div_rate": 0.0
+    },
+    "exp-only|polynomial": {
+      "mse_median": 9.377349853515625,
+      "div_rate": 0.0
+    },
+    "log-only|polynomial": {
+      "mse_median": 15.051478385925293,
+      "div_rate": 0.0
+    },
+    "ReLU-MLP|polynomial": {
+      "mse_median": 9.44023323059082,
+      "div_rate": 0.0
+    },
+    "KAN|polynomial": {
+      "mse_median": 0.11807084828615189,
+      "div_rate": 0.0
+    },
+    "EML|trigonometric": {
+      "mse_median": 0.01475051511079073,
+      "div_rate": 0.0
+    },
+    "EML-noexp|trigonometric": {
+      "mse_median": 0.3701193034648895,
+      "div_rate": 0.0
+    },
+    "EML-nolog|trigonometric": {
+      "mse_median": 0.0007389545207843184,
+      "div_rate": 0.0
+    },
+    "exp-only|trigonometric": {
+      "mse_median": 0.19368614256381989,
+      "div_rate": 0.0
+    },
+    "log-only|trigonometric": {
+      "mse_median": 0.30604249238967896,
+      "div_rate": 0.0
+    },
+    "ReLU-MLP|trigonometric": {
+      "mse_median": 0.26547038555145264,
+      "div_rate": 0.0
+    },
+    "KAN|trigonometric": {
+      "mse_median": 0.0002192574174841866,
+      "div_rate": 0.0
+    },
+    "EML|piecewise": {
+      "mse_median": 0.03949481621384621,
+      "div_rate": 0.0
+    },
+    "EML-noexp|piecewise": {
+      "mse_median": 1.4713540077209473,
+      "div_rate": 0.0
+    },
+    "EML-nolog|piecewise": {
+      "mse_median": 0.017337946221232414,
+      "div_rate": 0.0
+    },
+    "exp-only|piecewise": {
+      "mse_median": 0.9560874700546265,
+      "div_rate": 0.0
+    },
+    "log-only|piecewise": {
+      "mse_median": 1.069837212562561,
+      "div_rate": 0.0
+    },
+    "ReLU-MLP|piecewise": {
+      "mse_median": 1.0386782884597778,
+      "div_rate": 0.0
+    },
+    "KAN|piecewise": {
+      "mse_median": 0.00742380041629076,
+      "div_rate": 0.0
+    }
+  },
+  "radioactive": {
+    "EML|radioactive_decay": {
+      "mse_median": 0.0029076857026666403
+    },
+    "EML-noexp|radioactive_decay": {
+      "mse_median": 0.015562635846436024
+    },
+    "EML-nolog|radioactive_decay": {
+      "mse_median": 0.0025570360012352467
+    },
+    "exp-only|radioactive_decay": {
+      "mse_median": 0.0025355012621730566
+    },
+    "log-only|radioactive_decay": {
+      "mse_median": 0.003903375007212162
+    },
+    "ReLU-MLP|radioactive_decay": {
+      "mse_median": 0.0027235858142375946
+    },
+    "KAN|radioactive_decay": {
+      "mse_median": 0.002777353161945939
+    }
+  },
+  "gradient_stats": {
+    "EML": {
+      "mean": 208.61933848431948,
+      "std": 2459.201469143112,
+      "p5": 0.0008841376198688522,
+      "p95": 311.1293167114248,
+      "pct_vanishing": 0.0,
+      "pct_exploding": 0.09226666666666666
+    },
+    "EML-noexp": {
+      "mean": 439.6881990068404,
+      "std": 7347.504625413831,
+      "p5": 0.01703677363693714,
+      "p95": 951.7567657470707,
+      "pct_vanishing": 0.0,
+      "pct_exploding": 0.18163636363636362
+    },
+    "EML-nolog": {
+      "mean": 0.002186754701487106,
+      "std": 0.002652043282022101,
+      "p5": 0.0003742630404303782,
+      "p95": 0.006615096656605602,
+      "pct_vanishing": 0.0,
+      "pct_exploding": 0.0
+    },
+    "ReLU-MLP": {
+      "mean": 0.0005475771140253138,
+      "std": 0.0012503683563314417,
+      "p5": 0.00011524235378601588,
+      "p95": 0.0018788079090882076,
+      "pct_vanishing": 0.0,
+      "pct_exploding": 0.0
+    },
+    "KAN": {
+      "mean": 0.0006143535398490106,
+      "std": 0.0008230475714711653,
+      "p5": 0.00014797405819990672,
+      "p95": 0.0024116862565278997,
+      "pct_vanishing": 0.0,
+      "pct_exploding": 0.0
+    }
+  },
+  "statistical_tests": [
+    {
+      "comparison": "EML < EML-noexp",
+      "target": "explog_product",
+      "p_value": 0.003968253968253968,
+      "cohens_d": 1.2017230030875212,
+      "significant_BH": true
+    },
+    {
+      "comparison": "EML < EML-nolog",
+      "target": "explog_product",
+      "p_value": 1.0,
+      "cohens_d": -2.0063991710118874,
+      "significant_BH": false
+    },
+    {
+      "comparison": "EML < exp-only",
+      "target": "explog_product",
+      "p_value": 1.0,
+      "cohens_d": -2.2160628145470747,
+      "significant_BH": false
+    },
+    {
+      "comparison": "EML < log-only",
+      "target": "explog_product",
+      "p_value": 0.003968253968253968,
+      "cohens_d": 1.0827998940600727,
+      "significant_BH": true
+    },
+    {
+      "comparison": "EML < ReLU-MLP",
+      "target": "explog_product",
+      "p_value": 0.7261904761904762,
+      "cohens_d": 1.0960650398202034,
+      "significant_BH": false
+    },
+    {
+      "comparison": "EML < KAN",
+      "target": "explog_product",
+      "p_value": 1.0,
+      "cohens_d": -2.1872345900452164,
+      "significant_BH": false
+    },
+    {
+      "comparison": "EML < EML-noexp",
+      "target": "power_function",
+      "p_value": 0.027777777777777776,
+      "cohens_d": 1.809270749001415,
+      "significant_BH": false
+    },
+    {
+      "comparison": "EML < EML-nolog",
+      "target": "power_function",
+      "p_value": 0.7261904761904762,
+      "cohens_d": 0.8015471771997128,
+      "significant_BH": false
+    },
+    {
+      "comparison": "EML < exp-only",
+      "target": "power_function",
+      "p_value": 1.0,
+      "cohens_d": -0.9940177136541783,
+      "significant_BH": false
+    },
+    {
+      "comparison": "EML < log-only",
+      "target": "power_function",
+      "p_value": 0.21031746031746032,
+      "cohens_d": 0.13802868618761557,
+      "significant_BH": false
+    },
+    {
+      "comparison": "EML < ReLU-MLP",
+      "target": "power_function",
+      "p_value": 0.9523809523809524,
+      "cohens_d": 0.6523611218558993,
+      "significant_BH": false
+    },
+    {
+      "comparison": "EML < KAN",
+      "target": "power_function",
+      "p_value": 0.9841269841269841,
+      "cohens_d": -0.9901716790035263,
+      "significant_BH": false
+    },
+    {
+      "comparison": "EML < EML-noexp",
+      "target": "logistic_log",
+      "p_value": 0.003968253968253968,
+      "cohens_d": 25.786150076159988,
+      "significant_BH": true
+    },
+    {
+      "comparison": "EML < EML-nolog",
+      "target": "logistic_log",
+      "p_value": 0.007936507936507936,
+      "cohens_d": 2.8740246536796006,
+      "significant_BH": true
+    },
+    {
+      "comparison": "EML < exp-only",
+      "target": "logistic_log",
+      "p_value": 0.003968253968253968,
+      "cohens_d": 32.61981304605767,
+      "significant_BH": true
+    },
+    {
+      "comparison": "EML < log-only",
+      "target": "logistic_log",
+      "p_value": 0.003968253968253968,
+      "cohens_d": 12.968511463463743,
+      "significant_BH": true
+    },
+    {
+      "comparison": "EML < ReLU-MLP",
+      "target": "logistic_log",
+      "p_value": 0.003968253968253968,
+      "cohens_d": 32.59130012283063,
+      "significant_BH": true
+    },
+    {
+      "comparison": "EML < KAN",
+      "target": "logistic_log",
+      "p_value": 1.0,
+      "cohens_d": -2.78354408380351,
+      "significant_BH": false
+    },
+    {
+      "comparison": "EML < EML-noexp",
+      "target": "cross_entropy",
+      "p_value": 0.003968253968253968,
+      "cohens_d": 17.677096751284704,
+      "significant_BH": true
+    },
+    {
+      "comparison": "EML < EML-nolog",
+      "target": "cross_entropy",
+      "p_value": 0.9523809523809524,
+      "cohens_d": -1.0375044714936938,
+      "significant_BH": false
+    },
+    {
+      "comparison": "EML < exp-only",
+      "target": "cross_entropy",
+      "p_value": 1.0,
+      "cohens_d": -1.558080563656322,
+      "significant_BH": false
+    },
+    {
+      "comparison": "EML < log-only",
+      "target": "cross_entropy",
+      "p_value": 0.003968253968253968,
+      "cohens_d": 0.9427608388315304,
+      "significant_BH": true
+    },
+    {
+      "comparison": "EML < ReLU-MLP",
+      "target": "cross_entropy",
+      "p_value": 1.0,
+      "cohens_d": -1.5409586185791708,
+      "significant_BH": false
+    },
+    {
+      "comparison": "EML < KAN",
+      "target": "cross_entropy",
+      "p_value": 1.0,
+      "cohens_d": -1.5521077538148151,
+      "significant_BH": false
+    }
+  ]
+}
