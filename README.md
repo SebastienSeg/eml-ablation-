@@ -16,23 +16,40 @@ l'hypothèse aussi facilement que la confirmer.
 Les résultats du dernier run sont dans [`results/RESULTS.md`](results/RESULTS.md)
 (fichier généré, jamais recopié à la main).
 
-## Ce que disent les résultats (run `--quick`, 5 seeds)
+## Verdict : hypothèse RÉFUTÉE (15 seeds, 16 cibles, 9 variants)
 
-En l'état, **l'hypothèse n'est pas confirmée**. L'EML d'origine est
-significativement moins bon que ReLU-MLP, KAN et exp-only sur 3 des 4 cibles
-in-domain, avec des NMSE 10 à 100 fois plus élevées. Il ne gagne que sur
-`logistic_log`, contre ReLU-MLP et KAN, mais à égalité avec exp-only et
-EML-nolog. Les ablations désignent le coupable : **retirer la branche log
-(`EML-nolog`) améliore EML partout**, alors que retirer la branche exp le
-détruit. La branche `ln(|z| + δ)` fait clipper 11 % des steps d'EML (77 % pour
-log-only) et dégrade l'apprentissage.
+Selon la règle fixée avant les runs (voir [Verdict global](#verdict-global-règle-fixée-avant-les-runs)),
+la famille EML (EML, EML-v2, EML→ReLU) **ne gagne aucune des 12 cibles
+favorables**. Sur aucune d'elles, un membre EML ne bat significativement à la
+fois ReLU-MLP, KAN, exp-only, log-only et les ablations. Détail dans
+[`results/RESULTS.md`](results/RESULTS.md).
 
-L'upgrade `EML-v2` (log lisse + biais) supprime le clipping (0 %) et devient
-le meilleur ou quasi-meilleur variant sur `explog_product`, `power_function`,
-`cross_entropy` et `trigonometric`. Mais il fait jeu égal avec `exp-only`, ce
-qui ne permet pas d'attribuer le gain à la combinaison exp + log plutôt qu'à
-l'exponentielle seule. Avec 5 seeds, ces conclusions restent indicatives : le
-protocole complet (`python main.py`) est nécessaire pour les confirmer.
+Ce que montrent les chiffres :
+
+- **L'EML d'origine perd.** Il est significativement pire que l'autre variant
+  dans 24 comparaisons in-domain sur 32, et dans 18 log-essentielles sur 24.
+  Sa branche `ln(|z| + δ)` a une dérivée qui explose près de 0 et dégrade
+  l'apprentissage. Le retirer (`EML-nolog`) l'améliore partout.
+- **L'upgrade EML-v2 rattrape les meilleurs, sans les dépasser.** Avec un log
+  lisse et des biais de branche, il atteint le niveau de `exp-only` et
+  d'`EML-nolog` (même ordre de NMSE, écarts de ±20 %), mais ne les bat pas.
+  Le gain vient de l'exponentielle, pas de la combinaison exp + log.
+- **Même là où le log est indispensable, il n'aide pas.** Sur `log_ratio`
+  (entrées sur 4 décades), le meilleur est ReLU-MLP. Sur `product_ratio` et
+  `power_law`, ce sont exp-only et EML-nolog.
+- **L'extrapolation ne sauve pas l'hypothèse.** Aucun variant n'extrapole
+  correctement `extrap_power` ni `extrap_product`. Sur `extrap_log_ratio`,
+  ReLU-MLP fait 14× mieux que le meilleur EML.
+- **Le seul « succès » est un contrôle.** EML-v2 gagne `trigonometric`, une
+  cible sans exp/log : son léger avantage n'est donc pas spécifique à la
+  structure exp/log.
+
+Limite de ce run : il a été interrompu à 2 097 runs sur 2 320. Toutes les
+cibles favorables et `ood` sont complètes (15 seeds × 9 variants). Il manque
+4 variants sur le contrôle `extrap_polynomial`, ainsi que le sweep HP,
+l'ablation δ et les gradients. Ces étapes manquantes ne peuvent pas changer
+le verdict, qui repose sur les 12 cibles favorables, toutes complètes. Pour
+les compléter : `python main.py --seeds 15` (reprend là où le run s'est arrêté).
 
 ---
 
