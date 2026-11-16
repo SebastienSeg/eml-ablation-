@@ -32,7 +32,7 @@ Ce que montrent les chiffres :
   l'apprentissage. Le retirer (`EML-nolog`) l'améliore partout.
 - **L'upgrade EML-v2 rattrape les meilleurs, sans les dépasser.** Avec un log
   lisse et des biais de branche, il atteint le niveau de `exp-only` et
-  d'`EML-nolog` (même ordre de NMSE, écarts de ±20 %), mais ne les bat pas.
+  d'`EML-nolog` (même ordre de NMSE, écarts de ±30 %), mais ne les bat pas.
   Le gain vient de l'exponentielle, pas de la combinaison exp + log.
 - **Même là où le log est indispensable, il n'aide pas.** Sur `log_ratio`
   (entrées sur 4 décades), le meilleur est ReLU-MLP. Sur `product_ratio` et
