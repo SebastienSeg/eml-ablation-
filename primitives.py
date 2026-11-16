@@ -1,152 +1,145 @@
 """
-primitives.py — couches et architectures pour chaque variant.
+primitives.py — couches, registre de variants et construction des réseaux.
 
-Topologie fixe : toutes les architectures utilisent le même graphe
-fully-connected (chaque neurone reçoit toutes les activations de la couche
-précédente). Seule la fonction de transformation differ entre variants.
-Les matrices de projection W_exp et W_log dans EMLLayer sont l'analogue
-des matrices de poids classiques — elles définissent quelles combinaisons
-linéaires des entrées alimentent respectivement la branche exp et la branche log.
+Architecture commune à tous les variants :
+
+    x ─▶ [Primitive → LayerNorm] × depth ─▶ Linear(hidden → 1) ─▶ ŷ
+
+Seule la primitive des couches cachées change d'un variant à l'autre. La
+couche de sortie est TOUJOURS linéaire : une primitive en sortie biaiserait
+la comparaison (ex. un ReLU en sortie ne peut pas produire de valeur < 0,
+un exp ne peut pas changer de signe sans α).
+
+Iso-paramétrie : la largeur `hidden` de chaque variant est choisie pour que
+son nombre de paramètres ENTRAÎNABLES soit le plus proche possible de celui
+de ReLU-MLP à largeur `cfg.hidden`. Le comptage se fait sur le vrai modèle
+(pas de formule à la main qui pourrait diverger du code).
+
+Ajouter un variant (ex. un "upgrade" d'EML) = écrire une fonction
+`(d_in, d_out, layer_idx, cfg) -> nn.Module` décorée par `@register(...)`.
+Il est alors automatiquement entraîné, iso-paramétré, testé statistiquement
+contre EML et tracé dans les figures.
 """
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from functools import lru_cache
+from typing import Callable
 
 import torch
 import torch.nn as nn
-from config import DELTA_DEFAULT, EXP_CLAMP
+
+from config import TrainConfig
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# EML
+# Primitives
 # ─────────────────────────────────────────────────────────────────────────────
 
-class EMLLayer(nn.Module):
+class Primitive(nn.Module):
+    """Classe marqueur : les hooks de gradient ne s'attachent qu'à ces couches."""
+
+
+class EMLLayer(Primitive):
     """
-    Nœud binaire : EML(x) = α · exp(W_exp · x) − β · ln(|W_log · x| + δ)
+    EML(x) = α ⊙ exp(clamp(W_e·x + b_e)) − β ⊙ L(W_l·x + b_l) + bias
 
-    Paramètres appris : W_exp (d_in × d_out), W_log (d_in × d_out),
-                        α (d_out,), β (d_out,), bias (d_out,)
-
-    freeze_exp=True → α fixé à 0 → variante "log-only interne" (EML-noexp)
-    freeze_log=True → β fixé à 0 → variante "exp-only interne" (EML-nolog)
-
-    init_scale contrôle l'écart-type de l'initialisation de α et β.
+    log_mode :
+      "abs"    → L(z) = ln(|z| + δ)        (version originale ; ∂L/∂z ≤ 1/δ)
+      "smooth" → L(z) = ½·ln(z² + 1)       (lisse, ∂L/∂z ≤ ½, ≈ ln|z| pour |z| ≫ 1)
+    branch_bias : ajoute b_e, b_l. Sans b_l, la singularité du log est
+      collée à l'hyperplan W_l·x = 0, qui passe toujours par l'origine.
+    use_exp / use_log : ablations. Une branche désactivée n'a aucun
+      paramètre (équivalent à α ≡ 0 gelé, sans gaspiller de calcul).
     """
 
-    def __init__(self, in_features: int, out_features: int,
-                 freeze_exp: bool = False, freeze_log: bool = False,
-                 delta: float = DELTA_DEFAULT, init_scale: float = 1.0):
+    def __init__(self, d_in: int, d_out: int, *, delta: float = 1e-4,
+                 init_scale: float = 1.0, exp_clamp: float = 6.0,
+                 use_exp: bool = True, use_log: bool = True,
+                 branch_bias: bool = False, log_mode: str = "abs"):
         super().__init__()
-        self.in_features  = in_features
-        self.out_features = out_features
-        self.delta        = delta
-        self.freeze_exp   = freeze_exp
-        self.freeze_log   = freeze_log
+        if not (use_exp or use_log):
+            raise ValueError("au moins une branche doit être active")
+        if log_mode not in ("abs", "smooth"):
+            raise ValueError(f"log_mode inconnu : {log_mode!r}")
+        self.delta, self.exp_clamp, self.log_mode = delta, exp_clamp, log_mode
+        self.bias = nn.Parameter(torch.zeros(d_out))
 
-        self.W_exp = nn.Linear(in_features, out_features, bias=False)
-        self.W_log = nn.Linear(in_features, out_features, bias=False)
-        self.alpha = nn.Parameter(torch.empty(out_features).normal_(1.0, init_scale))
-        self.beta  = nn.Parameter(torch.empty(out_features).normal_(1.0, init_scale))
-        self.bias  = nn.Parameter(torch.zeros(out_features))
+        self.W_exp = self.alpha = None
+        self.W_log = self.beta = None
+        if use_exp:
+            self.W_exp = nn.Linear(d_in, d_out, bias=branch_bias)
+            self.alpha = nn.Parameter(torch.empty(d_out).normal_(1.0, init_scale))
+            nn.init.xavier_uniform_(self.W_exp.weight)
+        if use_log:
+            self.W_log = nn.Linear(d_in, d_out, bias=branch_bias)
+            self.beta = nn.Parameter(torch.empty(d_out).normal_(1.0, init_scale))
+            nn.init.xavier_uniform_(self.W_log.weight)
 
-        nn.init.xavier_uniform_(self.W_exp.weight)
-        nn.init.xavier_uniform_(self.W_log.weight)
-
-        if freeze_exp:
-            self.W_exp.weight.requires_grad_(False)
-            self.alpha.data.zero_()
-            self.alpha.requires_grad_(False)
-        if freeze_log:
-            self.W_log.weight.requires_grad_(False)
-            self.beta.data.zero_()
-            self.beta.requires_grad_(False)
+    def log_branch(self, z: torch.Tensor) -> torch.Tensor:
+        if self.log_mode == "abs":
+            return torch.log(z.abs() + self.delta)
+        return 0.5 * torch.log1p(z * z)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        exp_part = torch.zeros(x.shape[0], self.out_features, device=x.device)
-        log_part = torch.zeros_like(exp_part)
-        if not self.freeze_exp:
-            exp_part = self.alpha * torch.exp(
-                torch.clamp(self.W_exp(x), -EXP_CLAMP, EXP_CLAMP)
-            )
-        if not self.freeze_log:
-            log_part = self.beta * torch.log(
-                torch.abs(self.W_log(x)) + self.delta
-            )
-        return exp_part - log_part + self.bias
+        out = self.bias
+        if self.W_exp is not None:
+            z = self.W_exp(x).clamp(-self.exp_clamp, self.exp_clamp)
+            out = out + self.alpha * torch.exp(z)
+        if self.W_log is not None:
+            out = out - self.beta * self.log_branch(self.W_log(x))
+        return out
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Baselines
-# ─────────────────────────────────────────────────────────────────────────────
+class ExpOnlyLayer(Primitive):
+    """α ⊙ exp(clamp(W·x + b))"""
 
-class ExpOnlyLayer(nn.Module):
-    """α · exp(W·x + b) — exponentielle pure."""
-    def __init__(self, in_features: int, out_features: int, **_):
+    def __init__(self, d_in: int, d_out: int, *, exp_clamp: float = 6.0):
         super().__init__()
-        self.linear = nn.Linear(in_features, out_features)
-        self.alpha  = nn.Parameter(torch.ones(out_features))
+        self.linear, self.exp_clamp = nn.Linear(d_in, d_out), exp_clamp
+        self.alpha = nn.Parameter(torch.ones(d_out))
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.alpha * torch.exp(
-            torch.clamp(self.linear(x), -EXP_CLAMP, EXP_CLAMP)
-        )
+    def forward(self, x):
+        return self.alpha * torch.exp(self.linear(x).clamp(-self.exp_clamp, self.exp_clamp))
 
 
-class LogOnlyLayer(nn.Module):
-    """α · ln(|W·x| + δ) — logarithme pur."""
-    def __init__(self, in_features: int, out_features: int,
-                 delta: float = DELTA_DEFAULT, **_):
+class LogOnlyLayer(Primitive):
+    """α ⊙ ln(|W·x + b| + δ)"""
+
+    def __init__(self, d_in: int, d_out: int, *, delta: float = 1e-4):
         super().__init__()
-        self.linear = nn.Linear(in_features, out_features)
-        self.alpha  = nn.Parameter(torch.ones(out_features))
-        self.delta  = delta
+        self.linear, self.delta = nn.Linear(d_in, d_out), delta
+        self.alpha = nn.Parameter(torch.ones(d_out))
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.alpha * torch.log(torch.abs(self.linear(x)) + self.delta)
+    def forward(self, x):
+        return self.alpha * torch.log(self.linear(x).abs() + self.delta)
 
 
-class ReLULayer(nn.Module):
-    """max(0, W·x + b) — MLP standard."""
-    def __init__(self, in_features: int, out_features: int, **_):
+class ReLULayer(Primitive):
+    """max(0, W·x + b)"""
+
+    def __init__(self, d_in: int, d_out: int):
         super().__init__()
-        self.linear = nn.Linear(in_features, out_features)
+        self.linear = nn.Linear(d_in, d_out)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x):
         return torch.relu(self.linear(x))
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# KAN-lite : activations B-spline apprenables
-# ─────────────────────────────────────────────────────────────────────────────
+class KANLayer(Primitive):
+    """
+    KAN-lite : y_j = Σ_i φ_ij(s_ij·(x_i − t_ij)), φ_ij spline linéaire par
+    morceaux à k points de contrôle sur une grille uniforme fixe [x_min, x_max].
+    Version simplifiée de Liu et al. 2024 (pas de B-splines cubiques, pas de
+    terme de base SiLU, pas de raffinement de grille) → borne inférieure de KAN.
+    """
 
-class BSplineActivation(nn.Module):
-    """Spline linéaire par morceaux à k points de contrôle apprenables."""
-
-    def __init__(self, k: int = 8, x_min: float = -6.0, x_max: float = 6.0):
+    def __init__(self, d_in: int, d_out: int, *, k: int = 8,
+                 x_min: float = -6.0, x_max: float = 6.0):
         super().__init__()
-        self.register_buffer("grid", torch.linspace(x_min, x_max, k))
-        self.ctrl = nn.Parameter(torch.randn(k) * 0.1)
-        self.scale = nn.Parameter(torch.ones(1))
-        self.shift = nn.Parameter(torch.zeros(1))
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x_norm = self.scale * (x - self.shift)
-        grid = self.grid
-        xc   = x_norm.clamp(grid[0], grid[-1] - 1e-6)
-        idx  = torch.searchsorted(grid.contiguous(), xc.contiguous()).clamp(1, len(grid) - 1)
-        t    = (xc - grid[idx - 1]) / (grid[idx] - grid[idx - 1] + 1e-8)
-        return self.ctrl[idx - 1] * (1 - t) + self.ctrl[idx] * t
-
-
-class KANLayer(nn.Module):
-    """Couche KAN vectorisée : une B-spline apprise par connexion (i → j)."""
-
-    def __init__(self, in_features: int, out_features: int,
-                 k: int = 8, x_min: float = -6.0, x_max: float = 6.0, **_):
-        super().__init__()
-        self.in_features  = in_features
-        self.out_features = out_features
-        self.k = k
-        n_act = in_features * out_features
-
+        self.d_in, self.d_out, self.k = d_in, d_out, k
+        n_act = d_in * d_out
         self.register_buffer("grid", torch.linspace(x_min, x_max, k))
         self.ctrl  = nn.Parameter(torch.randn(n_act, k) * 0.1)
         self.scale = nn.Parameter(torch.ones(n_act))
@@ -154,121 +147,139 @@ class KANLayer(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B = x.shape[0]
-        # (B, in) → (B, out*in) : chaque entrée répétée pour chaque sortie
-        x_exp  = x.repeat(1, self.out_features)
-        x_norm = self.scale * (x_exp - self.shift)
-
-        grid = self.grid
-        xc  = x_norm.clamp(grid[0], grid[-1] - 1e-6)
-        idx = torch.searchsorted(
-            grid.contiguous(), xc.contiguous()
-        ).clamp(1, self.k - 1)
-
-        t = (xc - grid[idx - 1]) / (grid[idx] - grid[idx - 1] + 1e-8)
-
-        # Gather des points de contrôle par activation
-        ctrl_exp = self.ctrl.unsqueeze(0).expand(B, -1, -1)   # (B, n_act, k)
-        ctrl_lo  = ctrl_exp.gather(2, (idx - 1).unsqueeze(2)).squeeze(2)
-        ctrl_hi  = ctrl_exp.gather(2, idx.unsqueeze(2)).squeeze(2)
-
-        y = ctrl_lo * (1 - t) + ctrl_hi * t                   # (B, n_act)
-        return y.view(B, self.out_features, self.in_features).sum(dim=2)
+        # activation a = j·d_in + i reçoit x_i
+        xn = self.scale * (x.repeat(1, self.d_out) - self.shift)          # (B, n_act)
+        g = self.grid
+        xc = xn.clamp(g[0], g[-1] - 1e-6)
+        idx = torch.searchsorted(g, xc.contiguous()).clamp(1, self.k - 1)
+        t = (xc - g[idx - 1]) / (g[idx] - g[idx - 1])
+        rows = torch.arange(self.ctrl.shape[0], device=x.device)
+        y = self.ctrl[rows, idx - 1] * (1 - t) + self.ctrl[rows, idx] * t
+        return y.view(B, self.d_out, self.d_in).sum(dim=2)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Construction des réseaux
+# Registre de variants
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _eml_frozen_exp(i, o, **kw):
-    return EMLLayer(i, o, freeze_exp=True,  **kw)
-
-def _eml_frozen_log(i, o, **kw):
-    return EMLLayer(i, o, freeze_log=True, **kw)
+LayerFactory = Callable[[int, int, int, TrainConfig], nn.Module]
 
 
-LAYER_MAP = {
-    "EML":       EMLLayer,
-    "EML-noexp": _eml_frozen_exp,
-    "EML-nolog": _eml_frozen_log,
-    "exp-only":  ExpOnlyLayer,
-    "log-only":  LogOnlyLayer,
-    "ReLU-MLP":  ReLULayer,
-    "KAN":       KANLayer,
-}
+@dataclass(frozen=True)
+class Variant:
+    name:        str
+    family:      str          # "eml" | "ablation" | "baseline" | "upgrade"
+    description: str
+    make_layer:  LayerFactory # (d_in, d_out, layer_idx, cfg) → couche cachée
 
-VARIANTS_MAIN    = list(LAYER_MAP.keys())
-VARIANTS_DISPLAY = VARIANTS_MAIN  # ordre d'affichage
+
+VARIANTS: dict[str, Variant] = {}
+
+
+def register(name: str, family: str, description: str):
+    def deco(fn: LayerFactory) -> LayerFactory:
+        if name in VARIANTS:
+            raise ValueError(f"variant déjà enregistré : {name}")
+        VARIANTS[name] = Variant(name, family, description, fn)
+        return fn
+    return deco
+
+
+def _eml_kw(cfg: TrainConfig) -> dict:
+    return dict(delta=cfg.delta, init_scale=cfg.init_scale, exp_clamp=cfg.exp_clamp)
+
+
+@register("EML", "eml", "α·exp(W_e·x) − β·ln(|W_l·x| + δ)")
+def _eml(i, o, layer, cfg):
+    return EMLLayer(i, o, **_eml_kw(cfg))
+
+
+@register("EML-noexp", "ablation", "EML sans branche exp")
+def _eml_noexp(i, o, layer, cfg):
+    return EMLLayer(i, o, use_exp=False, **_eml_kw(cfg))
+
+
+@register("EML-nolog", "ablation", "EML sans branche log")
+def _eml_nolog(i, o, layer, cfg):
+    return EMLLayer(i, o, use_log=False, **_eml_kw(cfg))
+
+
+@register("exp-only", "baseline", "α·exp(W·x + b)")
+def _exp_only(i, o, layer, cfg):
+    return ExpOnlyLayer(i, o, exp_clamp=cfg.exp_clamp)
+
+
+@register("log-only", "baseline", "α·ln(|W·x + b| + δ)")
+def _log_only(i, o, layer, cfg):
+    return LogOnlyLayer(i, o, delta=cfg.delta)
+
+
+@register("ReLU-MLP", "baseline", "max(0, W·x + b)")
+def _relu(i, o, layer, cfg):
+    return ReLULayer(i, o)
+
+
+@register("KAN", "baseline", "splines apprenables par connexion (k=8)")
+def _kan(i, o, layer, cfg):
+    return KANLayer(i, o)
+
+
+# ── Upgrades ────────────────────────────────────────────────────────────────
+
+@register("EML-v2", "upgrade",
+          "EML + biais de branche + log lisse ½·ln(z²+1) (gradient borné)")
+def _eml_v2(i, o, layer, cfg):
+    return EMLLayer(i, o, branch_bias=True, log_mode="smooth", **_eml_kw(cfg))
+
+
+@register("EML→ReLU", "upgrade",
+          "hybride : 1re couche EML-v2, couches suivantes ReLU")
+def _eml_hybrid(i, o, layer, cfg):
+    if layer == 0:
+        return EMLLayer(i, o, branch_bias=True, log_mode="smooth", **_eml_kw(cfg))
+    return ReLULayer(i, o)
+
+
+REFERENCE_VARIANT = "ReLU-MLP"
+
+
+def variants_by_family(*families: str) -> list[str]:
+    return [v.name for v in VARIANTS.values() if v.family in families]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Iso-paramétrie : ajuster hidden par variant pour ~même n_params que ReLU-MLP
+# Construction + iso-paramétrie
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _estimate_layer_params(variant: str, d_in: int, d_out: int) -> int:
-    """Nombre total de paramètres pour une couche (y compris gelés)."""
-    if variant in ("EML", "EML-noexp", "EML-nolog"):
-        return 2 * d_in * d_out + 3 * d_out
-    elif variant in ("exp-only", "log-only"):
-        return d_in * d_out + 2 * d_out
-    elif variant == "ReLU-MLP":
-        return d_in * d_out + d_out
-    elif variant == "KAN":
-        return d_in * d_out * 10   # k=8 ctrl + scale + shift par activation
-    return 0
-
-
-def _estimate_network_params(variant: str, in_dim: int,
-                             hidden: int, depth: int) -> int:
-    """Nombre total de paramètres (y compris LayerNorm) pour un réseau."""
-    dims = [in_dim] + [hidden] * depth + [1]
-    total = 0
-    for i in range(len(dims) - 1):
-        total += _estimate_layer_params(variant, dims[i], dims[i + 1])
-        if i < len(dims) - 2:
-            total += 2 * dims[i + 1]
-    return total
-
-
-def _find_iso_hidden(variant: str, in_dim: int,
-                     ref_hidden: int, depth: int) -> int:
-    """Taille hidden qui rapproche le param count de celui de ReLU-MLP."""
-    if variant == "ReLU-MLP":
-        return ref_hidden
-    ref_params = _estimate_network_params("ReLU-MLP", in_dim, ref_hidden, depth)
-    best_h, best_diff = 1, float("inf")
-    for h in range(1, ref_hidden * 3):
-        diff = abs(_estimate_network_params(variant, in_dim, h, depth) - ref_params)
-        if diff < best_diff:
-            best_diff = diff
-            best_h = h
-    return best_h
-
-
-def build_network(variant: str, in_dim: int,
-                  hidden: int, depth: int,
-                  delta: float = DELTA_DEFAULT,
-                  init_scale: float = 1.0) -> nn.Module:
-    """
-    Réseau profond avec la primitive spécifiée.
-
-    Topologie : fully-connected, LayerNorm entre couches cachées.
-    hidden est la taille de référence (pour ReLU-MLP). Les autres variants
-    ajustent cette taille pour être iso-paramétriques (~même nombre total
-    de paramètres que ReLU-MLP).
-    """
-    hidden = _find_iso_hidden(variant, in_dim, hidden, depth)
-    LayerClass = LAYER_MAP[variant]
-    layers = []
-    dims   = [in_dim] + [hidden] * depth + [1]
-    kw     = {"delta": delta, "init_scale": init_scale}
-
-    for i in range(len(dims) - 1):
-        layers.append(LayerClass(dims[i], dims[i + 1], **kw))
-        if i < len(dims) - 2:
-            layers.append(nn.LayerNorm(dims[i + 1]))
-
+def _assemble(variant: str, in_dim: int, hidden: int, cfg: TrainConfig) -> nn.Sequential:
+    make = VARIANTS[variant].make_layer
+    layers: list[nn.Module] = []
+    d = in_dim
+    for layer in range(cfg.depth):
+        layers += [make(d, hidden, layer, cfg), nn.LayerNorm(hidden)]
+        d = hidden
+    layers.append(nn.Linear(d, 1))
     return nn.Sequential(*layers)
 
 
 def count_params(model: nn.Module) -> int:
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+@lru_cache(maxsize=None)
+def iso_hidden(variant: str, in_dim: int, ref_hidden: int, depth: int) -> int:
+    """Largeur dont le nb de paramètres entraînables est le plus proche de ReLU-MLP."""
+    cfg = TrainConfig(hidden=ref_hidden, depth=depth)
+    if variant == REFERENCE_VARIANT:
+        return ref_hidden
+    target = count_params(_assemble(REFERENCE_VARIANT, in_dim, ref_hidden, cfg))
+    candidates = range(1, 3 * ref_hidden + 1)
+    return min(candidates,
+               key=lambda h: abs(count_params(_assemble(variant, in_dim, h, cfg)) - target))
+
+
+def build_network(variant: str, in_dim: int, cfg: TrainConfig) -> nn.Sequential:
+    if variant not in VARIANTS:
+        raise KeyError(f"variant inconnu : {variant!r} (connus : {list(VARIANTS)})")
+    hidden = iso_hidden(variant, in_dim, cfg.hidden, cfg.depth)
+    return _assemble(variant, in_dim, hidden, cfg)
