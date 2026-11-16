@@ -69,15 +69,20 @@ d'échelles différentes deviennent comparables.
 
 **Une expérience** (`main.py`) :
 
-| Étape          | Contenu                                                             |
-|----------------|---------------------------------------------------------------------|
-| `in-domain`    | tous les variants × 4 cibles exp/log × N seeds                      |
-| `ood`          | tous les variants × 3 cibles sans exp/log (contrôle négatif)        |
-| `radioactive`  | tous les variants × `exp(−λt)` + bruit (test sans bruit)            |
-| `hp-sweep`     | EML × 27 configs (lr, δ, init_scale) × 5 seeds                      |
-| `delta`        | EML × δ ∈ {1e-6 … 1e-2} × 5 seeds                                   |
-| `gradients`    | 1 run par variant avec hooks ‖∂L/∂sortie‖ par couche                |
-| analyse        | stats + figures + `RESULTS.md` + `results_summary.json`             |
+| Étape                   | Contenu                                                             |
+|-------------------------|---------------------------------------------------------------------|
+| `in-domain`             | 4 cibles exp/log sur petit domaine                                  |
+| `log-essential`         | 3 cibles où le log est indispensable (plusieurs décades, produits)  |
+| `extrapolation`         | 4 cibles entraînées sur un domaine, testées sur un domaine disjoint |
+| `radioactive`           | `exp(−λt)` + bruit (test sans bruit)                                |
+| `ood`                   | 3 cibles sans exp/log (contrôle négatif)                            |
+| `extrapolation-control` | extrapolation d'un polynôme (contrôle négatif)                      |
+| `hp-sweep`              | EML × 27 configs (lr, δ, init_scale) × 5 seeds                      |
+| `delta`                 | EML × δ ∈ {1e-6 … 1e-2} × 5 seeds                                   |
+| `gradients`             | 1 run par variant avec hooks ‖∂L/∂sortie‖ par couche                |
+| analyse                 | tests, **verdict global**, figures, `RESULTS.md`, JSON              |
+
+Chaque famille de cibles est entraînée avec tous les variants × N seeds.
 
 ## Variants
 
@@ -95,16 +100,59 @@ d'échelles différentes deviennent comparables.
 
 ## Cibles
 
-| Famille       | Nom              | f                                    | Domaine      |
-|---------------|------------------|--------------------------------------|--------------|
-| in-domain     | `explog_product` | `exp(−x²)·ln(1 + y²)`                | [−2, 2]²     |
-| in-domain     | `power_function` | `(y + 1)^x = exp(x·ln(1 + y))`       | [0.1, 2]²    |
-| in-domain     | `logistic_log`   | `σ(x)·exp(y)·ln(z + 2)`              | [−2, 2]³     |
-| in-domain     | `cross_entropy`  | `H(σ(x)) + H(σ(y))`                  | [−3, 3]²     |
-| out-of-domain | `polynomial`     | `x³ + 2x²y − 0.5y³ + 0.3xy`          | [−2, 2]²     |
-| out-of-domain | `trigonometric`  | `sin(πx)·cos(πy) + 0.5·sin(2πx)`     | [−1, 1]²     |
-| out-of-domain | `piecewise`      | `\|x\|·sign(y) + clamp(xy, ±1)`      | [−2, 2]²     |
-| bruitée       | `radioactive_decay` | `exp(−λt) + N(0, 0.05²)`, X = [t, λ] | t∈[0,5], λ∈[0.2,2] |
+| Famille       | Nom              | f                                    | Domaine (train → test)      |
+|---------------|------------------|--------------------------------------|-----------------------------|
+| in-domain     | `explog_product` | `exp(−x²)·ln(1 + y²)`                | [−2, 2]²                    |
+| in-domain     | `power_function` | `(y + 1)^x = exp(x·ln(1 + y))`       | [0.1, 2]²                   |
+| in-domain     | `logistic_log`   | `σ(x)·exp(y)·ln(z + 2)`              | [−2, 2]³                    |
+| in-domain     | `cross_entropy`  | `H(σ(x)) + H(σ(y))`                  | [−3, 3]²                    |
+| log-essential | `log_ratio`      | `ln(x₁/x₂)`                          | [10⁻², 10²]² log-uniforme   |
+| log-essential | `product_ratio`  | `x₁·x₂/x₃ = exp(Σ ± ln xᵢ)`          | [0.5, 2]³ log-uniforme      |
+| log-essential | `power_law`      | `x₁^1.5 · x₂^−0.5`                   | [0.2, 5]² log-uniforme      |
+| extrapolation | `extrap_log_ratio` | `ln(x₁/x₂)`                        | [0.1, 10]² → [10, 100]²     |
+| extrapolation | `extrap_power`   | `(y + 1)^x`                          | [0.1, 1]² → [1, 2]²         |
+| extrapolation | `extrap_product` | `x₁·x₂/x₃`                           | [0.5, 2]³ → [2, 4]³         |
+| extrapolation | `extrap_decay`   | `exp(−λt)`                           | t ∈ [0, 2.5] → [2.5, 5]     |
+| radioactive   | `radioactive_decay` | `exp(−λt) + N(0, 0.05²)`, X = [t, λ] | t∈[0,5], λ∈[0.2,2]      |
+| ood (contrôle) | `polynomial`    | `x³ + 2x²y − 0.5y³ + 0.3xy`          | [−2, 2]²                    |
+| ood (contrôle) | `trigonometric` | `sin(πx)·cos(πy) + 0.5·sin(2πx)`     | [−1, 1]²                    |
+| ood (contrôle) | `piecewise`     | `\|x\|·sign(y) + clamp(xy, ±1)`     | [−2, 2]²                    |
+| extrapolation-control | `extrap_polynomial` | polynôme ci-dessus        | [−1, 1]² → [1, 2]²          |
+
+Les cibles **log-essentielles** corrigent une faiblesse des cibles in-domain :
+sur un petit intervalle, `ln(1 + y²)` ou `ln(z + 2)` ne sont que des courbes
+lisses que n'importe quel réseau approche sans avoir besoin d'un log. Sur
+plusieurs ordres de grandeur, ou quand la fonction est un produit de
+puissances, un réseau sans log doit approcher `ln` par morceaux.
+
+L'**extrapolation** est le test le plus exigeant : on évalue hors du domaine
+d'entraînement. Un ReLU prolonge en ligne droite. Seul un réseau qui a
+réellement capturé la loi exp/log peut continuer juste. Le polynôme extrapolé
+sert de contrôle : si EML extrapolait bien partout, ce ne serait pas grâce à
+la structure exp/log.
+
+## Verdict global (règle fixée avant les runs)
+
+Hypothèse H : *une couche contenant exp ET log en dur apprend mieux, à
+paramètres égaux, les fonctions à structure exp/log.*
+
+Une cible est **gagnée** si au moins un membre de la famille EML (`EML`,
+`EML-v2`, `EML→ReLU`) est significativement meilleur que **chacun** des
+comparateurs : `ReLU-MLP`, `KAN`, `exp-only`, `log-only`, et aussi les
+ablations `EML-nolog` et `EML-noexp`. Gagner grâce à la seule exponentielle ne
+compte donc pas. Toutes les p-values (membres × comparateurs × cibles) sont
+corrigées ensemble par Benjamini-Hochberg.
+
+| Verdict          | Condition                                                                   |
+|------------------|-----------------------------------------------------------------------------|
+| **réfutée**      | moins de 25 % des 12 cibles favorables gagnées                              |
+| **soutenue**     | au moins 50 % des favorables gagnées, et taux supérieur à celui des contrôles |
+| non concluante   | entre les deux                                                              |
+
+Le critère est volontairement indulgent pour EML : il suffit qu'un seul de
+ses trois membres gagne. Un échec est donc une réfutation forte. Les seuils
+sont dans `stats_analysis.py` (`REFUTE_BELOW`, `SUPPORT_FROM`) et ne doivent
+pas être modifiés après avoir vu les résultats.
 
 ## Statistiques
 
