@@ -16,6 +16,24 @@ l'hypothèse aussi facilement que la confirmer.
 Les résultats du dernier run sont dans [`results/RESULTS.md`](results/RESULTS.md)
 (fichier généré, jamais recopié à la main).
 
+## Ce que disent les résultats (run `--quick`, 5 seeds)
+
+En l'état, **l'hypothèse n'est pas confirmée**. L'EML d'origine est
+significativement moins bon que ReLU-MLP, KAN et exp-only sur 3 des 4 cibles
+in-domain, avec des NMSE 10 à 100 fois plus élevées. Il ne gagne que sur
+`logistic_log`, contre ReLU-MLP et KAN, mais à égalité avec exp-only et
+EML-nolog. Les ablations désignent le coupable : **retirer la branche log
+(`EML-nolog`) améliore EML partout**, alors que retirer la branche exp le
+détruit. La branche `ln(|z| + δ)` fait clipper 11 % des steps d'EML (77 % pour
+log-only) et dégrade l'apprentissage.
+
+L'upgrade `EML-v2` (log lisse + biais) supprime le clipping (0 %) et devient
+le meilleur ou quasi-meilleur variant sur `explog_product`, `power_function`,
+`cross_entropy` et `trigonometric`. Mais il fait jeu égal avec `exp-only`, ce
+qui ne permet pas d'attribuer le gain à la combinaison exp + log plutôt qu'à
+l'exponentielle seule. Avec 5 seeds, ces conclusions restent indicatives : le
+protocole complet (`python main.py`) est nécessaire pour les confirmer.
+
 ---
 
 ## Ce que fait le code, de bout en bout
