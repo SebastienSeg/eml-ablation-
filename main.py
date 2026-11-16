@@ -22,6 +22,7 @@ Exemples :
 from __future__ import annotations
 
 import argparse
+import os
 import itertools
 import json
 import time
@@ -177,7 +178,10 @@ def parse_args(argv=None):
                    choices=ALL_TARGETS)
     p.add_argument("--stages", nargs="+", default=None, choices=STAGES)
     p.add_argument("--sweep-target", default="explog_product", choices=list(IN_DOMAIN))
-    p.add_argument("--workers", type=int, default=0, help="0 = nb de CPU")
+    p.add_argument("--workers", type=int, default=0,
+                   help="nb de runs en parallèle (0 = moitié des cœurs logiques)")
+    p.add_argument("--full-priority", action="store_true",
+                   help="ne pas abaisser la priorité des workers (plus rapide, PC moins réactif)")
     p.add_argument("--out", type=Path, default=Path("results"))
     p.add_argument("--analyze-only", action="store_true",
                    help="ne lance aucun entraînement, analyse le JSONL existant")
@@ -197,12 +201,16 @@ def main(argv=None):
 
     print(f"\n{'=' * 64}\n  EML ABLATION STUDY\n  device={DEVICE}  seeds={args.seeds}  "
           f"epochs={cfg.epochs}  variants={len(args.variants)}\n{'=' * 64}")
+    from runner import default_workers
+    print(f"  workers={args.workers or default_workers()} / {os.cpu_count()} cœurs logiques"
+          f"  priorité={'normale' if args.full_priority else 'basse'}")
     print_param_counts(args.variants, cfg)
 
     if not args.analyze_only:
         for i, (stage, jobs) in enumerate(build_jobs(args, cfg).items(), 1):
             section(f"{i}. {stage} — {len(jobs)} runs")
-            run_jobs(jobs, runs_path, workers=args.workers, desc=stage)
+            run_jobs(jobs, runs_path, workers=args.workers, desc=stage,
+                     low_priority=not args.full_priority)
 
     results = load_results(runs_path)
     if not results:
