@@ -155,3 +155,110 @@ def analyze_sweep(results: list[RunResult], keys: tuple[str, ...]) -> dict[tuple
     return {k: {"median": float(np.median(v)), "values": v,
                 "div_rate": float(np.mean(np.isinf(v)))}
             for k, v in groups.items()}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Verdict global (règle de décision fixée AVANT de voir les résultats)
+# ─────────────────────────────────────────────────────────────────────────────
+
+REFUTE_BELOW = 0.25   # famille EML gagne < 25 % des cibles favorables → réfutée
+SUPPORT_FROM = 0.50   # ≥ 50 % des favorables ET plus que sur les contrôles → soutenue
+
+
+@dataclass
+class TargetVerdict:
+    target:          str
+    family:          str
+    favorable:       bool
+    best_member:     str          # meilleure médiane dans la famille EML
+    best_member_nmse: float
+    best_comparator: str          # meilleure médiane parmi les comparateurs
+    best_comparator_nmse: float
+    winners:         list         # membres significativement meilleurs que TOUS les comparateurs
+    losers:          list         # membres significativement pires que le meilleur comparateur
+
+    @property
+    def won(self) -> bool:
+        return bool(self.winners)
+
+
+@dataclass
+class GlobalVerdict:
+    verdict:        str           # "réfutée" | "soutenue" | "non concluante"
+    favorable_won:  int
+    favorable_n:    int
+    control_won:    int
+    control_n:      int
+    per_target:     list
+    members:        list
+    comparators:    list
+
+    @property
+    def favorable_rate(self) -> float:
+        return self.favorable_won / max(1, self.favorable_n)
+
+    @property
+    def control_rate(self) -> float:
+        return self.control_won / max(1, self.control_n)
+
+
+def global_verdict(results: list[RunResult], targets: list[str], family_of,
+                   favorable_families: list[str], members: list[str],
+                   comparators: list[str], alpha: float = 0.05) -> GlobalVerdict:
+    """
+    Hypothèse H : « une couche contenant exp ET log en dur apprend mieux, à
+    paramètres égaux, les fonctions à structure exp/log ».
+
+    Une cible est GAGNÉE si au moins un membre de la famille EML (EML ou un
+    upgrade) est significativement meilleur que CHAQUE comparateur (baselines
+    ET ablations, donc aussi exp-only et EML-nolog : gagner grâce à la seule
+    exponentielle ne compte pas). Toutes les p-values (membres × comparateurs ×
+    cibles) sont corrigées ensemble par BH.
+
+    Ce critère est volontairement indulgent pour EML (il suffit d'un membre sur
+    plusieurs) : un échec est donc une réfutation forte.
+    """
+    by = defaultdict(list)
+    for r in results:
+        by[(r.variant, r.target)].append(r.nmse_te)
+
+    raw = []   # (target, member, comparator, p, r)
+    for t in targets:
+        for m in members:
+            if (m, t) not in by:
+                continue
+            for c in comparators:
+                if (c, t) in by:
+                    p, r, _ = compare(np.array(by[(m, t)]), np.array(by[(c, t)]))
+                    raw.append((t, m, c, p, r))
+    p_adj = sps.false_discovery_control([x[3] for x in raw], method="bh") if raw else []
+    sig = defaultdict(dict)    # (t, m) → {c: +1 meilleur / −1 pire / 0 n.s.}
+    for (t, m, c, _, r), pa in zip(raw, p_adj):
+        sig[(t, m)][c] = (1 if r > 0 else -1) if pa < alpha else 0
+
+    per_target = []
+    for t in targets:
+        med = {v: float(np.median(by[(v, t)])) for v in members + comparators if (v, t) in by}
+        mem = [m for m in members if m in med]
+        com = [c for c in comparators if c in med]
+        if not mem or not com:
+            continue
+        bm = min(mem, key=med.get)
+        bc = min(com, key=med.get)
+        winners = [m for m in mem if sig[(t, m)] and all(sig[(t, m)].get(c) == 1 for c in com)]
+        losers = [m for m in mem if sig[(t, m)].get(bc) == -1]
+        per_target.append(TargetVerdict(t, family_of(t), family_of(t) in favorable_families,
+                                        bm, med[bm], bc, med[bc], winners, losers))
+
+    fav = [v for v in per_target if v.favorable]
+    ctl = [v for v in per_target if not v.favorable]
+    fw, cw = sum(v.won for v in fav), sum(v.won for v in ctl)
+    f_rate = fw / max(1, len(fav))
+    c_rate = cw / max(1, len(ctl))
+    if f_rate < REFUTE_BELOW:
+        verdict = "réfutée"
+    elif f_rate >= SUPPORT_FROM and f_rate > c_rate:
+        verdict = "soutenue"
+    else:
+        verdict = "non concluante"
+    return GlobalVerdict(verdict, fw, len(fav), cw, len(ctl), per_target, members, comparators)

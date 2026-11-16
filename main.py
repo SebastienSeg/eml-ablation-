@@ -1,14 +1,13 @@
 """
 main.py — orchestrateur de l'étude d'ablation EML.
 
-Étapes :
-  1. in-domain      : variants × 4 cibles exp/log × N seeds
-  2. out-of-domain  : variants × 3 cibles sans structure exp/log × N seeds
-  3. radioactive    : variants × décroissance bruitée × N seeds
-  4. hp-sweep       : EML × 27 configs (lr, δ, init_scale) × 5 seeds
-  5. delta          : EML × 5 valeurs de δ × 5 seeds
-  6. gradients      : 1 run par variant avec hooks de gradient
-  7. analyse        : Mann-Whitney bilatéral + BH, figures, LaTeX, RESULTS.md, JSON
+Étapes (une par famille de cibles, cf. targets.py) :
+  in-domain, log-essential, extrapolation, radioactive   (favorables à EML)
+  ood, extrapolation-control                             (contrôles négatifs)
+  hp-sweep   : EML × 27 configs (lr, δ, init_scale) × 5 seeds
+  delta      : EML × 5 valeurs de δ × 5 seeds
+  gradients  : 1 run par variant avec hooks de gradient
+  analyse    : Mann-Whitney bilatéral + BH, VERDICT GLOBAL, figures, RESULTS.md
 
 Chaque run est sauvegardé dès qu'il termine dans <out>/runs.jsonl ; relancer
 la commande reprend là où elle s'était arrêtée.
@@ -34,11 +33,13 @@ from config import (DEVICE, DELTA_ABLATION, HP_SWEEP, N_SEEDS_MAIN, N_SEEDS_QUIC
                     N_SEEDS_SWEEP, TrainConfig)
 from primitives import VARIANTS, build_network, count_params, iso_hidden
 from runner import Job, load_results, run_jobs
-from stats_analysis import run_tests, summarize
-from targets import IN_DOMAIN, OUT_OF_DOMAIN, RADIOACTIVE
+from primitives import variants_by_family
+from stats_analysis import global_verdict, run_tests, summarize
+from targets import (ALL_TARGETS, FAMILIES, FAVORABLE_FAMILIES,
+                     IN_DOMAIN, RADIOACTIVE, family_of, targets_of)
 import figures as F
 
-STAGES = ["in-domain", "ood", "radioactive", "hp-sweep", "delta", "gradients"]
+STAGES = [*FAMILIES, "hp-sweep", "delta", "gradients"]
 
 
 def section(title: str):
@@ -54,68 +55,78 @@ def print_param_counts(variants: list[str], cfg: TrainConfig):
             print(f"    {v:10s} hidden={h:3d}  params={n:5d}")
 
 
+def selected_targets(args, family: str) -> list[str]:
+    return [t for t in targets_of(family) if not args.targets or t in args.targets]
+
+
 def build_jobs(args, cfg: TrainConfig) -> dict[str, list[Job]]:
     seeds = range(args.seeds)
-    in_t  = [t for t in IN_DOMAIN if not args.targets or t in args.targets]
-    ood_t = [t for t in OUT_OF_DOMAIN if not args.targets or t in args.targets]
     jobs: dict[str, list[Job]] = {}
+    for fam in FAMILIES:
+        jobs[fam] = [Job("main", v, t, s, cfg) for t in selected_targets(args, fam)
+                     for v in args.variants for s in seeds]
 
-    jobs["in-domain"] = [Job("main", v, t, s, cfg)
-                         for t in in_t for v in args.variants for s in seeds]
-    jobs["ood"] = [Job("main", v, t, s, cfg)
-                   for t in ood_t for v in args.variants for s in seeds]
-    if not args.targets or RADIOACTIVE in args.targets:
-        jobs["radioactive"] = [Job("main", v, RADIOACTIVE, s, cfg)
-                               for v in args.variants for s in seeds]
-
-    sweep_target = args.sweep_target
-    if "EML" in VARIANTS:
-        jobs["hp-sweep"] = [
-            Job("hp_sweep", "EML", sweep_target, s, cfg.with_(lr=lr, delta=d, init_scale=i))
-            for lr, d, i in itertools.product(HP_SWEEP["lr"], HP_SWEEP["delta"],
-                                              HP_SWEEP["init_scale"])
-            for s in range(N_SEEDS_SWEEP)]
-        jobs["delta"] = [Job("delta", "EML", sweep_target, s, cfg.with_(delta=d))
-                         for d in DELTA_ABLATION for s in range(N_SEEDS_SWEEP)]
-    jobs["gradients"] = [Job("gradients", v, sweep_target, 0, cfg, collect_grads=True)
+    st = args.sweep_target
+    jobs["hp-sweep"] = [
+        Job("hp_sweep", "EML", st, s, cfg.with_(lr=lr, delta=d, init_scale=i))
+        for lr, d, i in itertools.product(HP_SWEEP["lr"], HP_SWEEP["delta"], HP_SWEEP["init_scale"])
+        for s in range(N_SEEDS_SWEEP)]
+    jobs["delta"] = [Job("delta", "EML", st, s, cfg.with_(delta=d))
+                     for d in DELTA_ABLATION for s in range(N_SEEDS_SWEEP)]
+    jobs["gradients"] = [Job("gradients", v, st, 0, cfg, collect_grads=True)
                          for v in args.variants]
     return {k: v for k, v in jobs.items() if k in args.stages and v}
+
+
+FIG_NAMES = {
+    "in-domain": "fig1_in_domain.pdf", "ood": "fig2_out_of_domain.pdf",
+    "log-essential": "fig8_log_essential.pdf", "extrapolation": "fig9_extrapolation.pdf",
+    "extrapolation-control": "fig10_extrapolation_control.pdf",
+}
 
 
 def analyze(results: list, args, cfg: TrainConfig, out: Path, elapsed: float):
     section("Analyse statistique")
     main_runs = [r for r in results if r.tag == "main" and r.variant in args.variants
-                 and r.config == cfg.to_dict()]
-    in_t  = [t for t in IN_DOMAIN if any(r.target == t for r in main_runs)]
-    ood_t = [t for t in OUT_OF_DOMAIN if any(r.target == t for r in main_runs)]
-    rad_runs = [r for r in main_runs if r.target == RADIOACTIVE]
+                 and r.config == cfg.to_dict() and r.seed < args.seeds]
+    present = {r.target for r in main_runs}
+    fam_targets = {f: [t for t in targets_of(f) if t in present] for f in FAMILIES}
+    all_t = [t for t in ALL_TARGETS if t in present]
     summ = summarize(main_runs)
     n_seeds = max((r.seed for r in main_runs), default=-1) + 1
 
     tests = []
     if "EML" in args.variants:
-        tests = run_tests(main_runs, in_t + ood_t + ([RADIOACTIVE] if rad_runs else []),
-                          reference="EML", others=args.variants)
-        for fam, ts in (("in-domain", in_t), ("out-of-domain", ood_t)):
-            sub = [t for t in tests if t.target in ts]
+        tests = run_tests(main_runs, all_t, reference="EML", others=args.variants)
+        for fam in FAMILIES:
+            sub = [t for t in tests if t.target in fam_targets[fam]]
             if sub:
                 b = sum(t.verdict == "better" for t in sub)
                 w = sum(t.verdict == "worse" for t in sub)
-                print(f"  {fam:14s}: EML meilleur {b}/{len(sub)}, pire {w}/{len(sub)} (BH 5 %)")
+                print(f"  EML {fam:22s}: meilleur {b}/{len(sub)}, pire {w}/{len(sub)}")
 
-    for t in in_t + ood_t + ([RADIOACTIVE] if rad_runs else []):
-        ranked = sorted((s.nmse_median, v) for (v, tt), s in summ.items() if tt == t)
-        print(f"  {t:18s} " + "  ".join(f"{v}={m:.1e}" for m, v in ranked[:4]))
+    members = [v for v in variants_by_family("eml", "upgrade") if v in args.variants]
+    comparators = [v for v in args.variants if v not in members]
+    gv = None
+    if members and comparators:
+        gv = global_verdict(main_runs, all_t, family_of, FAVORABLE_FAMILIES, members, comparators)
+        print(f"\n  VERDICT GLOBAL : hypothèse {gv.verdict.upper()}  "
+              f"(cibles favorables gagnées {gv.favorable_won}/{gv.favorable_n}, "
+              f"contrôles gagnés {gv.control_won}/{gv.control_n})")
+        for v in gv.per_target:
+            mark = "GAGNÉE par " + ", ".join(v.winners) if v.won else "non gagnée"
+            print(f"    {v.target:20s} {v.family:22s} {v.best_member}={v.best_member_nmse:.1e}"
+                  f"  vs {v.best_comparator}={v.best_comparator_nmse:.1e}  → {mark}")
 
     section("Figures et exports")
     figs = out / "figures"
-    if in_t:
-        F.fig_nmse_grid(summ, in_t, args.variants, figs, "fig1_in_domain.pdf",
-                        "NMSE test médiane ± IC95 — cibles in-domain")
-        F.fig_learning_curves(main_runs, in_t[0], args.variants, figs)
-    if ood_t:
-        F.fig_nmse_grid(summ, ood_t, args.variants, figs, "fig2_out_of_domain.pdf",
-                        "NMSE test médiane ± IC95 — cibles out-of-domain")
+    for fam, name in FIG_NAMES.items():
+        if fam_targets[fam]:
+            F.fig_nmse_grid(summ, fam_targets[fam], args.variants, figs, name,
+                            f"NMSE test médiane ± IC95 — {fam}")
+    if fam_targets["in-domain"]:
+        F.fig_learning_curves(main_runs, fam_targets["in-domain"][0], args.variants, figs)
+    rad_runs = [r for r in main_runs if r.target == RADIOACTIVE]
     if rad_runs:
         F.fig_radioactive(rad_runs, args.variants, figs)
     grad_runs = [r for r in results if r.tag == "gradients" and r.variant in args.variants]
@@ -129,15 +140,13 @@ def analyze(results: list, args, cfg: TrainConfig, out: Path, elapsed: float):
         F.fig_delta_sensitivity(delta, DELTA_ABLATION, figs, default=cfg.delta)
 
     (figs / "table1_full.tex").write_text(
-        F.table_latex(summ, tests, in_t, args.variants, n_seeds))
+        F.table_latex(summ, tests, all_t, args.variants, n_seeds))
     print(f"  → {figs / 'table1_full.tex'}")
 
     meta = {"n_seeds": n_seeds, "device": DEVICE, "variants": args.variants,
             "total_time_sec": elapsed, **cfg.to_dict()}
-    sections = [(n, summ, ts) for n, ts in (("In-domain", in_t), ("Out-of-domain", ood_t),
-                                            ("Décroissance radioactive", [RADIOACTIVE] if rad_runs else []))
-                if ts]
-    (out / "RESULTS.md").write_text(F.results_markdown(sections, args.variants, tests, meta))
+    sections = [(f, summ, fam_targets[f]) for f in FAMILIES if fam_targets[f]]
+    (out / "RESULTS.md").write_text(F.results_markdown(sections, args.variants, tests, meta, gv))
     print(f"  → {out / 'RESULTS.md'}")
 
     def clean(x):
@@ -145,8 +154,13 @@ def analyze(results: list, args, cfg: TrainConfig, out: Path, elapsed: float):
 
     export = {
         "meta": meta,
+        "verdict": None if gv is None else {
+            "verdict": gv.verdict, "favorable_won": gv.favorable_won,
+            "favorable_n": gv.favorable_n, "control_won": gv.control_won,
+            "control_n": gv.control_n, "members": gv.members, "comparators": gv.comparators,
+            "per_target": [{k: clean(v) for k, v in vars(x).items()} for x in gv.per_target]},
         "summaries": [{k: clean(v) for k, v in vars(s).items()} for s in summ.values()],
-        "tests": [{**{k: clean(v) for k, v in vars(t).items()}} for t in tests],
+        "tests": [{k: clean(v) for k, v in vars(t).items()} for t in tests],
     }
     (out / "results_summary.json").write_text(json.dumps(export, indent=2, ensure_ascii=False))
     print(f"  → {out / 'results_summary.json'}")
@@ -160,7 +174,7 @@ def parse_args(argv=None):
     p.add_argument("--epochs", type=int, default=TrainConfig.epochs)
     p.add_argument("--variants", nargs="+", default=list(VARIANTS), choices=list(VARIANTS))
     p.add_argument("--targets", nargs="+", default=None,
-                   choices=[*IN_DOMAIN, *OUT_OF_DOMAIN, RADIOACTIVE])
+                   choices=ALL_TARGETS)
     p.add_argument("--stages", nargs="+", default=None, choices=STAGES)
     p.add_argument("--sweep-target", default="explog_product", choices=list(IN_DOMAIN))
     p.add_argument("--workers", type=int, default=0, help="0 = nb de CPU")

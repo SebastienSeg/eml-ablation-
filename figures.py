@@ -269,8 +269,37 @@ def table_latex(summaries, tests: list[TestResult], targets, variants, n_seeds: 
     return "\n".join(lines)
 
 
+def verdict_markdown(gv) -> list[str]:
+    from stats_analysis import REFUTE_BELOW, SUPPORT_FROM
+    md = [
+        f"## Verdict global : hypothèse **{gv.verdict.upper()}**", "",
+        f"Cibles favorables gagnées : **{gv.favorable_won}/{gv.favorable_n}** "
+        f"({gv.favorable_rate:.0%}) · contrôles négatifs gagnés : "
+        f"{gv.control_won}/{gv.control_n} ({gv.control_rate:.0%}).", "",
+        "Règle fixée avant les runs : une cible est *gagnée* si au moins un membre de "
+        f"la famille EML ({', '.join(gv.members)}) est significativement meilleur "
+        f"(Mann-Whitney bilatéral, BH sur tous les tests) que **chacun** des "
+        f"comparateurs ({', '.join(gv.comparators)}). Hypothèse réfutée si moins de "
+        f"{REFUTE_BELOW:.0%} des cibles favorables sont gagnées, soutenue si au moins "
+        f"{SUPPORT_FROM:.0%} le sont et plus que de contrôles, non concluante sinon.", "",
+        "| Cible | Famille | Meilleur EML | NMSE | Meilleur comparateur | NMSE | ratio | Gagnée |",
+        "|---|---|---|---:|---|---:|---:|---|",
+    ]
+    for v in gv.per_target:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = np.log10(v.best_comparator_nmse / v.best_member_nmse)
+        tag = "favorable" if v.favorable else "contrôle"
+        won = "**oui** (" + ", ".join(v.winners) + ")" if v.won else "non"
+        md.append(f"| `{v.target}` | {v.family} ({tag}) | {v.best_member} | "
+                  f"{_fmt(v.best_member_nmse)} | {v.best_comparator} | "
+                  f"{_fmt(v.best_comparator_nmse)} | {ratio:+.2f} | {won} |")
+    md += ["", "ratio = log10(NMSE meilleur comparateur / NMSE meilleur EML) : "
+               "> 0 ⇔ la famille EML a la meilleure médiane.", ""]
+    return md
+
+
 def results_markdown(sections: list[tuple[str, dict, list[str]]], variants: list[str],
-                     tests: list[TestResult], meta: dict) -> str:
+                     tests: list[TestResult], meta: dict, gv=None) -> str:
     """Rapport Markdown : un tableau de NMSE par section + verdicts des tests."""
     md = [
         "# Résultats (généré automatiquement par `main.py`)", "",
@@ -280,6 +309,8 @@ def results_markdown(sections: list[tuple[str, dict, list[str]]], variants: list
         "(1.0 ≈ prédire la moyenne). Médiane sur les seeds, runs divergents comptés comme +inf. "
         "**Gras** = meilleure médiane de la ligne.", "",
     ]
+    if gv is not None:
+        md += verdict_markdown(gv)
     for title, summ, targets in sections:
         md += [f"## {title}", "", "| Cible | " + " | ".join(variants) + " |",
                "|---|" + "---:|" * len(variants)]

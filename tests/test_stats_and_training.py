@@ -6,8 +6,9 @@ import torch
 
 from config import TrainConfig
 from runner import Job, load_results, run_jobs
-from stats_analysis import compare, run_tests, summarize
-from targets import IN_DOMAIN, OUT_OF_DOMAIN, f_cross_entropy, get_dataset
+from stats_analysis import compare, global_verdict, run_tests, summarize
+from targets import (ALL_TARGETS, FAVORABLE_FAMILIES, TARGETS, f_cross_entropy, family_of,
+                     get_dataset, targets_of)
 from training import RunResult, run_one
 
 
@@ -53,7 +54,7 @@ def test_cross_entropy_target_is_exact():
     assert y[1].item() == pytest.approx(0.0, abs=1e-6)
 
 
-@pytest.mark.parametrize("target", [*IN_DOMAIN, *OUT_OF_DOMAIN, "radioactive_decay"])
+@pytest.mark.parametrize("target", ALL_TARGETS)
 def test_datasets_are_deterministic_and_standardized(target):
     a, b = get_dataset(target, 0), get_dataset(target, 0)
     assert torch.equal(a.X_tr, b.X_tr) and torch.equal(a.y_te, b.y_te)
@@ -82,3 +83,61 @@ def test_runner_persists_and_resumes(tmp_path):
     second = run_jobs(jobs, path, workers=1)        # tout en cache : rien n'est relancé
     assert len(load_results(path)) == 2
     assert [r.nmse_te for r in first] == [r.nmse_te for r in second]
+
+
+def test_every_family_has_targets():
+    for fam in ["in-domain", "log-essential", "extrapolation", "radioactive",
+                "ood", "extrapolation-control"]:
+        assert targets_of(fam)
+
+
+@pytest.mark.parametrize("target", targets_of("extrapolation") + targets_of("extrapolation-control"))
+def test_extrapolation_domains_are_disjoint(target):
+    spec = TARGETS[target]
+    assert spec.test_domain is not None
+    disjoint = [tr[1] <= te[0] or te[1] <= tr[0]
+                for tr, te in zip(spec.bounds(False), spec.bounds(True))]
+    assert any(disjoint)                 # au moins une dimension hors du domaine d'entraînement
+
+
+def test_log_uniform_spans_decades():
+    spec = TARGETS["log_ratio"]
+    import torch as _t
+    from targets import _sample
+    x = _sample(spec, 5000, False, _t.Generator().manual_seed(0))
+    frac_below_1 = (x[:, 0] < 1).float().mean().item()
+    assert 0.45 < frac_below_1 < 0.55     # moitié des points sous 1 sur [1e-2, 1e2]
+
+
+def _runs(variant, target, values):
+    return [_fake(variant, target, s, v) for s, v in enumerate(values)]
+
+
+def test_global_verdict_refutes_when_eml_never_wins():
+    good, bad = [1e-4 * (1 + 0.01 * i) for i in range(8)], [1e-2 * (1 + 0.01 * i) for i in range(8)]
+    res = []
+    for t in ["explog_product", "log_ratio", "polynomial"]:
+        res += _runs("EML", t, bad) + _runs("ReLU-MLP", t, good)
+    gv = global_verdict(res, ["explog_product", "log_ratio", "polynomial"], family_of,
+                        FAVORABLE_FAMILIES, ["EML"], ["ReLU-MLP"])
+    assert gv.verdict == "réfutée" and gv.favorable_won == 0 and gv.favorable_n == 2
+
+
+def test_global_verdict_requires_beating_every_comparator():
+    good, mid, bad = ([k * (1 + 0.01 * i) for i in range(8)] for k in (1e-4, 1e-3, 1e-2))
+    res = _runs("EML", "log_ratio", mid) + _runs("ReLU-MLP", "log_ratio", bad) \
+        + _runs("exp-only", "log_ratio", good)
+    gv = global_verdict(res, ["log_ratio"], family_of, FAVORABLE_FAMILIES,
+                        ["EML"], ["ReLU-MLP", "exp-only"])
+    assert not gv.per_target[0].won     # bat ReLU mais pas exp-only → non gagnée
+
+
+def test_global_verdict_supports_when_eml_wins_favorables_only():
+    good, bad = [1e-4 * (1 + 0.01 * i) for i in range(8)], [1e-2 * (1 + 0.01 * i) for i in range(8)]
+    res = []
+    for t in ["explog_product", "log_ratio"]:
+        res += _runs("EML-v2", t, good) + _runs("ReLU-MLP", t, bad)
+    res += _runs("EML-v2", "polynomial", bad) + _runs("ReLU-MLP", "polynomial", good)
+    gv = global_verdict(res, ["explog_product", "log_ratio", "polynomial"], family_of,
+                        FAVORABLE_FAMILIES, ["EML", "EML-v2"], ["ReLU-MLP"])
+    assert gv.verdict == "soutenue" and gv.control_won == 0

@@ -144,17 +144,21 @@ class KANLayer(Primitive):
         self.ctrl  = nn.Parameter(torch.randn(n_act, k) * 0.1)
         self.scale = nn.Parameter(torch.ones(n_act))
         self.shift = nn.Parameter(torch.zeros(n_act))
+        self.register_buffer("_row_offset", torch.arange(n_act) * k, persistent=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B = x.shape[0]
         # activation a = j·d_in + i reçoit x_i
         xn = self.scale * (x.repeat(1, self.d_out) - self.shift)          # (B, n_act)
         g = self.grid
-        xc = xn.clamp(g[0], g[-1] - 1e-6)
-        idx = torch.searchsorted(g, xc.contiguous()).clamp(1, self.k - 1)
-        t = (xc - g[idx - 1]) / (g[idx] - g[idx - 1])
-        rows = torch.arange(self.ctrl.shape[0], device=x.device)
-        y = self.ctrl[rows, idx - 1] * (1 - t) + self.ctrl[rows, idx] * t
+        h = g[1] - g[0]
+        # grille uniforme → indice de l'intervalle calculé directement (pas de searchsorted)
+        u = (xn.clamp(g[0], g[-1]) - g[0]) / h
+        idx = u.detach().floor().clamp(0, self.k - 2).long()
+        t = u - idx
+        flat = self.ctrl.view(-1)
+        base = idx + self._row_offset
+        y = flat[base] * (1 - t) + flat[base + 1] * t
         return y.view(B, self.d_out, self.d_in).sum(dim=2)
 
 
