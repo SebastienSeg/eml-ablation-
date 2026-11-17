@@ -43,7 +43,6 @@ Ce que montrent les chiffres :
 - **Le seul « succès » est un contrôle.** EML-v2 gagne `trigonometric`, une
   cible sans exp/log : son léger avantage n'est donc pas spécifique à la
   structure exp/log.
-
 - **Ce n'est pas un problème de réglage.** Le meilleur des 27 réglages
   (lr, δ, init_scale) testés pour EML sur `explog_product` donne une NMSE de
   3.7e-4, encore 10× pire qu'exp-only (3.8e-5) avec les réglages par défaut.
