@@ -44,12 +44,16 @@ Ce que montrent les chiffres :
   cible sans exp/log : son léger avantage n'est donc pas spécifique à la
   structure exp/log.
 
-Limite de ce run : il a été interrompu à 2 097 runs sur 2 320. Toutes les
-cibles favorables et `ood` sont complètes (15 seeds × 9 variants). Il manque
-4 variants sur le contrôle `extrap_polynomial`, ainsi que le sweep HP,
-l'ablation δ et les gradients. Ces étapes manquantes ne peuvent pas changer
-le verdict, qui repose sur les 12 cibles favorables, toutes complètes. Pour
-les compléter : `python main.py --seeds 15` (reprend là où le run s'est arrêté).
+- **Ce n'est pas un problème de réglage.** Le meilleur des 27 réglages
+  (lr, δ, init_scale) testés pour EML sur `explog_product` donne une NMSE de
+  3.7e-4, encore 10× pire qu'exp-only (3.8e-5) avec les réglages par défaut.
+  Faire varier δ de 1e-6 à 1e-2 ne change rien d'important (1.4e-3 à 3.4e-3).
+- **Les gradients confirment le diagnostic.** La branche `ln(|z| + δ)` fait
+  écrêter 12 % des steps d'EML, 42 % d'EML-noexp et 81 % de log-only, contre
+  0 % pour EML-v2, exp-only et ReLU-MLP.
+
+Run complet : 2 329 runs (15 seeds × 16 cibles × 9 variants, sweep HP,
+ablation δ, gradients). Pour le refaire : `python main.py --seeds 15`.
 
 ---
 
